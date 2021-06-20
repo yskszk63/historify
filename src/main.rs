@@ -13,85 +13,16 @@ use syn::{Ident, Token};
 use syn::visit_mut::{self, VisitMut};
 use quote::{format_ident, quote};
 
-fn map_runes(c: char) -> &'static str {
-    match c {
-        'A' => "\u{16A0}",
-        'B' => "\u{16A1}",
-        'C' => "\u{16A2}",
-        'D' => "\u{16A3}",
-        'E' => "\u{16A4}",
-        'F' => "\u{16A5}",
-        'G' => "\u{16A6}",
-        'H' => "\u{16A7}",
-        'I' => "\u{16A8}",
-        'J' => "\u{16A9}",
-        'K' => "\u{16AA}",
-        'L' => "\u{16AB}",
-        'M' => "\u{16AC}",
-        'N' => "\u{16AD}",
-        'O' => "\u{16AE}",
-        'P' => "\u{16AF}",
-        'Q' => "\u{16B0}",
-        'R' => "\u{16B1}",
-        'S' => "\u{16B2}",
-        'T' => "\u{16B3}",
-        'U' => "\u{16B4}",
-        'V' => "\u{16B5}",
-        'W' => "\u{16B6}",
-        'X' => "\u{16B7}",
-        'Y' => "\u{16B8}",
-        'Z' => "\u{16B9}",
-        'a' => "\u{16BA}",
-        'b' => "\u{16BB}",
-        'c' => "\u{16BC}",
-        'd' => "\u{16BD}",
-        'e' => "\u{16BE}",
-        'f' => "\u{16BF}",
-        'g' => "\u{16C0}",
-        'h' => "\u{16C1}",
-        'i' => "\u{16C2}",
-        'j' => "\u{16C3}",
-        'k' => "\u{16C4}",
-        'l' => "\u{16C0}",
-        'm' => "\u{16C0}",
-        'n' => "\u{16C0}",
-        'o' => "\u{16C5}",
-        'p' => "\u{16C6}",
-        'q' => "\u{16C7}",
-        'r' => "\u{16C8}",
-        's' => "\u{16C9}",
-        't' => "\u{16CA}",
-        'u' => "\u{16CB}",
-        'v' => "\u{16CC}",
-        'w' => "\u{16CD}",
-        'x' => "\u{16CE}",
-        'y' => "\u{16CF}",
-        'z' => "\u{16D0}",
-        '0' => "\u{16D1}",
-        '1' => "\u{16D2}",
-        '2' => "\u{16D3}",
-        '3' => "\u{16D4}",
-        '4' => "\u{16D5}",
-        '5' => "\u{16D6}",
-        '6' => "\u{16D7}",
-        '7' => "\u{16D8}",
-        '8' => "\u{16D9}",
-        '9' => "\u{16DA}",
-        '+' => "\u{16DB}",
-        '/' => "\u{16DC}",
-        '=' => "\u{16DD}",
-        c => panic!("{}", c),
-    }
-}
+mod map_runes;
+mod map_cuneiform;
+mod map_hieroglyph;
 
-fn map_ident(ident: &Ident, map: fn(char) -> &'static str) -> Ident {
-    let newname = base64::encode(ident.to_string().as_bytes());
-    //let newname = format!("{}_foo", ident);
-    let newname = newname.chars().map(map).collect::<String>();
+fn map_ident(ident: &Ident, convert: fn(&str) -> String) -> Ident {
+    let newname = convert(&ident.to_string());
     format_ident!("{}", newname)
 }
 
-struct V(fn(char) -> &'static str);
+struct V(fn(&str) -> String);
 
 impl VisitMut for V {
     fn visit_ident_mut(&mut self, i: &mut Ident) {
@@ -189,12 +120,12 @@ impl VisitMut for V {
     }
 }
 
-fn historify<R, W>(mut reader: R, mut writer: W, map: fn(char) -> &'static str) -> io::Result<()> where R: Read, W: Write {
+fn historify<R, W>(mut reader: R, mut writer: W, convert: fn(&str) -> String) -> io::Result<()> where R: Read, W: Write {
     let mut src = String::new();
     reader.read_to_string(&mut src).unwrap();
 
     let mut ast = syn::parse_file(&src).unwrap();
-    V(map).visit_file_mut(&mut ast);
+    V(convert).visit_file_mut(&mut ast);
     let prog = quote::quote! {
         #ast
     };
@@ -204,11 +135,12 @@ fn historify<R, W>(mut reader: R, mut writer: W, map: fn(char) -> &'static str) 
 }
 
 fn main() -> io::Result<()> {
+    let fun = map_hieroglyph::convert;
     if let Some(fname) =  env::args().nth(1) {
         let mut file = File::open(fname).unwrap();
-        historify(&mut file, io::stdout(), map_runes)?;
+        historify(&mut file, io::stdout(), fun)?;
     } else {
-        historify(io::stdin(), io::stdout(), map_runes)?;
+        historify(io::stdin(), io::stdout(), fun)?;
     }
 
     Ok(())
