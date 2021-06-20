@@ -1,4 +1,3 @@
-#![no_implicit_prelude]
 #![allow(uncommon_codepoints)]
 mod ᚼᚧᚩᛀᚻᚧᚵᛄᚹᚰᛝᛝ {
     #![allow(unused_imports)]

@@ -135,7 +135,8 @@ impl VisitMut for V {
         visit_mut::visit_file_mut(self, i);
 
         let attrs = syn::parse2::<syn::File>(quote! {
-            #![no_implicit_prelude]
+            //remove becuse cargo not work.
+            //#![no_implicit_prelude]
             #![allow(uncommon_codepoints)]
         }).unwrap();
         for attr in attrs.attrs {
