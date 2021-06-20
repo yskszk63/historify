@@ -76,7 +76,7 @@ fn main() {
 }
 ```
 
-[play.rust-lang.org](https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=2b29be4ff196bebde00bbaef4c0e485b)
+[play.rust-lang.org](https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=3336ba2aa991fd46fe82881f975a160a)
 
 ## usage
 
