@@ -1,3 +1,8 @@
+use proc_macro2::TokenTree;
+use syn::Macro;
+use syn::ItemUse;
+use syn::Visibility;
+use syn::ItemMod;
 use std::env;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -24,6 +29,8 @@ fn map_ident(ident: &Ident, convert: fn(&str) -> String) -> Ident {
 
 struct V {
     use_stack: Vec<Ident>,
+    use_vis_stack: Vec<Visibility>,
+    need_rename: Vec<Vec<(Visibility, Ident)>>,
     convert: fn(&str) -> String,
 }
 
@@ -31,6 +38,8 @@ impl V {
     fn new(convert: fn(&str) -> String) -> Self {
         Self {
             use_stack: vec![],
+            use_vis_stack: vec![],
+            need_rename: vec![],
             convert,
         }
     }
@@ -50,6 +59,33 @@ impl VisitMut for V {
         visit_mut::visit_type_mut(self, &mut i.ty)
     }
 
+    fn visit_item_mod_mut(&mut self, i: &mut ItemMod) {
+        for it in &mut i.attrs {
+            self.visit_attribute_mut(it);
+        }
+        self.visit_visibility_mut(&mut i.vis);
+        // no ident changes
+        // rename after
+        self.need_rename.last_mut().unwrap().push((i.vis.clone(), i.ident.clone()));
+        if let Some((_, items)) = &mut i.content {
+            let mut newitems = vec![];
+            for it in &mut *items {
+                self.need_rename.push(vec![]);
+                self.visit_item_mut(it);
+                newitems.push(it.clone());
+                for (visibility, need_rename) in self.need_rename.pop().unwrap() {
+                    let rename = map_ident(&need_rename, self.convert);
+                    let item = syn::parse2(quote! {
+                        #[allow(unused_imports)]
+                        #visibility use #need_rename as #rename;
+                    }).unwrap();
+                    newitems.push(item);
+                }
+            }
+            *items = newitems;
+        };
+    }
+
     fn visit_use_tree_mut(&mut self, i: &mut UseTree) {
         match i {
             UseTree::Name(name) => {
@@ -65,12 +101,12 @@ impl VisitMut for V {
                     rename,
                 });
             }
-            UseTree::Rename(name) => {
-                let rename = name.rename.clone();
-                let rename = map_ident(&rename, self.convert);
-                name.rename = rename;
-            }
             _ => visit_mut::visit_use_tree_mut(self, i)
+        }
+    }
+    fn visit_use_rename_mut(&mut self, i: &mut UseRename) {
+        if i.rename != "_" {
+            self.need_rename.last_mut().unwrap().push((self.use_vis_stack.last().unwrap().clone(), i.rename.clone()));
         }
     }
     fn visit_use_path_mut(&mut self, i: &mut UsePath) {
@@ -79,15 +115,29 @@ impl VisitMut for V {
         self.use_stack.pop();
     }
 
+    fn visit_item_use_mut(&mut self, i: &mut ItemUse) {
+        self.use_vis_stack.push(i.vis.clone());
+        visit_mut::visit_item_use_mut(self, i);
+        self.use_vis_stack.pop();
+    }
+
     fn visit_signature_mut(&mut self, i: &mut Signature) {
+        //https://github.com/rust-lang/rust/issues/28937
         if i.ident != "main" && !i.inputs.is_empty() {
             visit_mut::visit_signature_mut(self, i)
         }
     }
 
-    fn visit_file_mut(&mut self, i: &mut syn::File) {
-        visit_mut::visit_file_mut(self, i);
+    fn visit_macro_mut(&mut self, i: &mut Macro) {
+        self.visit_path_mut(&mut i.path);
+        self.visit_macro_delimiter_mut(&mut i.delimiter);
+        i.tokens = i.tokens.clone().into_iter().map(|t| match t {
+            TokenTree::Ident(ident) => map_ident(&ident, self.convert).into(),
+            _ => t,
+        }).collect();
+    }
 
+    fn visit_file_mut(&mut self, i: &mut syn::File) {
         let attrs = syn::parse2::<syn::File>(quote! {
             //remove becuse cargo not work.
             //#![no_implicit_prelude]
@@ -97,7 +147,7 @@ impl VisitMut for V {
             i.attrs.push(attr.clone());
         }
 
-        let mut prelude = syn::parse2(quote!{
+        let prelude = syn::parse2(quote!{
             mod prelude {
                 #![allow(unused_imports)]
                 use std::marker::{Copy, Send, Sized, Sync, Unpin};
@@ -117,25 +167,41 @@ impl VisitMut for V {
 
             }
         }).unwrap();
-        self.visit_item_mut(&mut prelude);
 
-        let mut ident = format_ident!("prelude");
-        self.visit_ident_mut(&mut ident);
-        let mut useprelude = syn::parse2(quote!{
+        let useprelude = syn::parse2(quote!{
             #[allow(unused_imports)]
-            use #ident::*;
+            use prelude::*;
         }).unwrap();
-        self.visit_item_mut(&mut useprelude);
 
-        let mut usemacro = syn::parse2(quote! {
+        let usemacro = syn::parse2(quote! {
             #[allow(unused_imports)]
             use std::{assert, assert_eq, assert_ne, cfg, column, compile_error, concat, dbg, debug_assert, debug_assert_eq, debug_assert_ne, env, eprint, eprintln, file, format, format_args, include, include_bytes, include_str, is_x86_feature_detected, line, matches, module_path, option_env, panic, print, println, stringify, thread_local, todo, unimplemented, unreachable, vec, write, writeln};
         }).unwrap();
-        self.visit_item_mut(&mut usemacro);
 
         i.items.insert(0, usemacro);
         i.items.insert(0, useprelude);
         i.items.insert(0, prelude);
+
+        for it in &mut i.attrs {
+            self.visit_attribute_mut(it);
+        }
+
+        let mut newitems = vec![];
+        for it in &mut *i.items {
+            self.need_rename.push(vec![]);
+            self.visit_item_mut(it);
+            newitems.push(it.clone());
+            for (visibility, need_rename) in self.need_rename.pop().unwrap() {
+                let rename = map_ident(&need_rename, self.convert);
+                let item = syn::parse2(quote! {
+                    #[allow(unused_imports)]
+                    #visibility use #need_rename as #rename;
+                }).unwrap();
+                newitems.push(item);
+            }
+        }
+        i.items = newitems;
+
     }
 }
 
