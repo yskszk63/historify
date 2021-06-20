@@ -22,11 +22,23 @@ fn map_ident(ident: &Ident, convert: fn(&str) -> String) -> Ident {
     format_ident!("{}", newname)
 }
 
-struct V(fn(&str) -> String);
+struct V {
+    use_stack: Vec<Ident>,
+    convert: fn(&str) -> String,
+}
+
+impl V {
+    fn new(convert: fn(&str) -> String) -> Self {
+        Self {
+            use_stack: vec![],
+            convert,
+        }
+    }
+}
 
 impl VisitMut for V {
     fn visit_ident_mut(&mut self, i: &mut Ident) {
-        *i = map_ident(i, self.0);
+        *i = map_ident(i, self.convert);
         visit_mut::visit_ident_mut(self, i);
     }
 
@@ -42,7 +54,11 @@ impl VisitMut for V {
         match i {
             UseTree::Name(name) => {
                 let ident = name.ident.clone();
-                let rename = map_ident(&ident, self.0);
+                let rename = if ident == "self" && !self.use_stack.is_empty() {
+                    map_ident(self.use_stack.last().unwrap(), self.convert)
+                } else {
+                    map_ident(&ident, self.convert)
+                };
                 *i = UseTree::Rename(UseRename {
                     ident,
                     as_token: Token![as](Span::call_site()),
@@ -53,7 +69,9 @@ impl VisitMut for V {
         }
     }
     fn visit_use_path_mut(&mut self, i: &mut UsePath) {
-        self.visit_use_tree_mut(&mut i.tree)
+        self.use_stack.push(i.ident.clone());
+        self.visit_use_tree_mut(&mut i.tree);
+        self.use_stack.pop();
     }
 
     fn visit_signature_mut(&mut self, i: &mut Signature) {
@@ -87,12 +105,8 @@ impl VisitMut for V {
                 use std::convert::{AsRef, AsMut, Into, From};
                 use std::default::Default;
                 use std::iter::{Iterator, Extend, IntoIterator, DoubleEndedIterator, ExactSizeIterator};
-                //use std::option::Option::{self, Some, None};
-                use std::option::Option;
-                use std::option::Option::{Some, None};
-                //use std::result::Result::{self, Ok, Err};
-                use std::result::Result;
-                use std::result::Result::{Ok, Err};
+                use std::option::Option::{self, Some, None};
+                use std::result::Result::{self, Ok, Err};
                 use std::string::{String, ToString};
                 use std::vec::Vec;
 
@@ -125,7 +139,7 @@ fn historify<R, W>(mut reader: R, mut writer: W, convert: fn(&str) -> String) ->
     reader.read_to_string(&mut src).unwrap();
 
     let mut ast = syn::parse_file(&src).unwrap();
-    V(convert).visit_file_mut(&mut ast);
+    V::new(convert).visit_file_mut(&mut ast);
     let prog = quote::quote! {
         #ast
     };
