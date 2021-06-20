@@ -65,6 +65,11 @@ impl VisitMut for V {
                     rename,
                 });
             }
+            UseTree::Rename(name) => {
+                let rename = name.rename.clone();
+                let rename = map_ident(&rename, self.convert);
+                name.rename = rename;
+            }
             _ => visit_mut::visit_use_tree_mut(self, i)
         }
     }
@@ -128,9 +133,9 @@ impl VisitMut for V {
         }).unwrap();
         self.visit_item_mut(&mut usemacro);
 
+        i.items.insert(0, usemacro);
+        i.items.insert(0, useprelude);
         i.items.insert(0, prelude);
-        i.items.insert(1, useprelude);
-        i.items.insert(2, usemacro);
     }
 }
 

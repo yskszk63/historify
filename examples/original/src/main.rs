@@ -1,3 +1,5 @@
+use std::println as puts;
+
 fn main() {
-    println!("Hello, world!");
+    puts!("Hello, world!");
 }
